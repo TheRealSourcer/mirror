@@ -2,6 +2,6 @@
   "uuid": "mirror@distro.com",
   "name": "Mirror",
   "description": "Mirror Android devices with wireless debugging enabled effortlessly",
-  "shell-version": ["49"],
+  "shell-version": ["49.2"],
   "url": "https://github.com/TheRealSourcer/mirror"
 }
