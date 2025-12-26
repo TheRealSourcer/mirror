@@ -20,6 +20,7 @@ const ScrcpyToggle = GObject.registerClass(
         iconName: "phone-symbolic",
         toggleMode: true,
       });
+      this._connectTimeoutId = 0;
 
       this._adbPath = GLib.find_program_in_path("adb");
       this._avahiPath = GLib.find_program_in_path("avahi-browse");
@@ -226,19 +227,32 @@ const ScrcpyToggle = GObject.registerClass(
 
       let attempts = 0;
 
-      GLib.timeout_add(GLib.PRIORITY_DEFAULT, 500, async () => {
-        attempts++;
+      if (this._connectTimeoutId) {
+        GLib.Source.remove(this._connectTimeoutId);
+        this._connectTimeoutId = 0;
+      }
 
-        const adb = await this._getAdbStatus();
-        if (adb[address] === "device") {
-          this._launchScrcpy(address);
-          return GLib.SOURCE_REMOVE;
-        }
+      this._connectTimeoutId = GLib.timeout_add(
+        GLib.PRIORITY_DEFAULT,
+        500,
+        async () => {
+          attempts++;
 
-        if (attempts >= 10) return GLib.SOURCE_REMOVE;
+          const adb = await this._getAdbStatus();
+          if (adb[address] === "device") {
+            this._launchScrcpy(address);
+            this._connectTimeoutId = 0;
+            return GLib.SOURCE_REMOVE;
+          }
 
-        return GLib.SOURCE_CONTINUE;
-      });
+          if (attempts >= 10) {
+            this._connectTimeoutId = 0;
+            return GLib.SOURCE_REMOVE;
+          }
+
+          return GLib.SOURCE_CONTINUE;
+        },
+      );
     }
 
     _launchScrcpy(serial) {
@@ -257,6 +271,14 @@ const ScrcpyToggle = GObject.registerClass(
         this.checked = false;
       }
     }
+    destroy() {
+      if (this._connectTimeoutId) {
+        GLib.Source.remove(this._connectTimeoutId);
+        this._connectTimeoutId = 0;
+      }
+
+      super.destroy();
+    }
   },
 );
 
@@ -269,6 +291,13 @@ const ScrcpyIndicator = GObject.registerClass(
 
       this.quickSettingsItems.push(new ScrcpyToggle());
     }
+
+    destroy() {
+      this.quickSettingsItems.forEach((item) => item.destroy());
+      this.quickSettingsItems.length = 0;
+
+      super.destroy();
+    }
   },
 );
 
@@ -279,7 +308,7 @@ export default class ScrcpyExtension extends Extension {
   }
 
   disable() {
-    this._indicator?.quickSettingsItems.forEach((i) => i.destroy());
     this._indicator?.destroy();
+    this._indicator = null;
   }
 }
