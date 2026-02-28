@@ -1,8 +1,6 @@
 import GObject from "gi://GObject";
 import Gio from "gi://Gio";
 import GLib from "gi://GLib";
-import St from "gi://St";
-import Clutter from "gi://Clutter";
 
 import * as Main from "resource:///org/gnome/shell/ui/main.js";
 import {
@@ -11,91 +9,154 @@ import {
 } from "resource:///org/gnome/shell/extensions/extension.js";
 import * as QuickSettings from "resource:///org/gnome/shell/ui/quickSettings.js";
 import * as PopupMenu from "resource:///org/gnome/shell/ui/popupMenu.js";
+import { Spinner } from "resource:///org/gnome/shell/ui/animation.js";
 
-const ScrcpyToggle = GObject.registerClass(
-  class ScrcpyToggle extends QuickSettings.QuickMenuToggle {
+const CONNECT_ATTEMPTS = 12;
+const CONNECT_RETRY_MS = 750;
+
+const MirrorToggle = GObject.registerClass(
+  class MirrorToggle extends QuickSettings.QuickMenuToggle {
     _init() {
       super._init({
         title: _("Mirror"),
         iconName: "phone-symbolic",
         toggleMode: true,
       });
-      this._connectTimeoutId = 0;
+
+      this.connect("clicked", () => this._onToggled());
 
       this._adbPath = GLib.find_program_in_path("adb");
+      this._scrcpyPath = GLib.find_program_in_path("scrcpy");
       this._avahiPath = GLib.find_program_in_path("avahi-browse");
 
-      this.menu.setHeader("phone-symbolic", _("Mirror"), _("Nearby Devices"));
+      this._activeScrcpyProc = null;
+      this._activeSerial = null;
+      this._refreshGeneration = 0;
+      this._destroyed = false;
 
-      this._spinner = new St.Icon({
-        icon_name: "process-working-symbolic",
-        icon_size: 16,
-        opacity: 0,
+      this._deviceNamesCache = new Map();
+
+      this.menu.setHeader("phone-symbolic", _("Mirror"));
+
+      this._spinner = new Spinner(16, {
+        hideOnStop: true,
       });
-      this.menu.addHeaderSuffix(this._spinner);
+      this._spinner.margin_left = 8;
+
+      if (this.menu._header && this.menu._headerSpacer) {
+        this.menu._header.insert_child_below(
+          this._spinner,
+          this.menu._headerSpacer,
+        );
+      } else {
+        this.menu.addHeaderSuffix(this._spinner);
+      }
 
       this._deviceSection = new PopupMenu.PopupMenuSection();
       this.menu.addMenuItem(this._deviceSection);
       this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-      this.menu.addAction(_("ADB Settings"), () => {
-        GLib.spawn_command_line_async("gnome-control-center network");
+      this.menu.addAction(_("Refresh Devices"), () => {
+        void this._refreshDevices();
       });
 
-      this.menu.connect("open-state-changed", (_, open) => {
-        if (open) this._refreshDevices();
+      this.menu.addAction(_("Open Network Settings"), () => {
+        Gio.Subprocess.new(
+          ["gnome-control-center", "network"],
+          Gio.SubprocessFlags.NONE,
+        );
+      });
+
+      this._openStateChangedId = this.menu.connect(
+        "open-state-changed",
+        (_menu, open) => {
+          if (open) void this._refreshDevices();
+        },
+      );
+    }
+
+    _onToggled() {
+      if (this.checked) {
+        if (!this._activeScrcpyProc) {
+          this.checked = false;
+          this.menu.open();
+        }
+      } else {
+        if (this._activeScrcpyProc) {
+          this._activeScrcpyProc.force_exit();
+        }
+      }
+    }
+
+    _sleep(ms) {
+      return new Promise((resolve) => {
+        GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => {
+          resolve();
+          return GLib.SOURCE_REMOVE;
+        });
       });
     }
 
-    /* -------------------- helpers -------------------- */
+    _setBusy(busy) {
+      if (busy) {
+        this._spinner.play();
+      } else {
+        this._spinner.stop();
+      }
+    }
 
-    _runCommand(argv) {
-      return new Promise((resolve) => {
-        try {
-          const proc = new Gio.Subprocess({
-            argv,
-            flags:
-              Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE,
-          });
-          proc.init(null);
+    async _runCommand(argv) {
+      try {
+        const proc = Gio.Subprocess.new(
+          argv,
+          Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE,
+        );
+
+        return await new Promise((resolve) => {
           proc.communicate_utf8_async(null, null, (p, res) => {
             try {
-              const [, stdout] = p.communicate_utf8_finish(res);
-              resolve(stdout ?? "");
+              const [, stdout, stderr] = p.communicate_utf8_finish(res);
+              resolve({
+                ok: p.get_successful(),
+                stdout: stdout ?? "",
+                stderr: stderr ?? "",
+              });
             } catch {
-              resolve("");
+              resolve({ ok: false, stdout: "", stderr: "" });
             }
           });
-        } catch {
-          resolve("");
-        }
-      });
+        });
+      } catch {
+        return { ok: false, stdout: "", stderr: "" };
+      }
     }
 
-    /* -------------------- adb -------------------- */
+    _setNoDevicesMessage(text) {
+      this._deviceSection.addMenuItem(
+        new PopupMenu.PopupMenuItem(text, { reactive: false }),
+      );
+    }
 
     async _getAdbStatus() {
-      const output = await this._runCommand([this._adbPath, "devices"]);
-      const devices = {};
+      const devices = new Map();
+      const { stdout } = await this._runCommand([this._adbPath, "devices"]);
 
-      for (const line of output.split("\n")) {
-        const t = line.trim();
-        if (!t) continue;
-        if (t.startsWith("List of devices")) continue;
+      for (const line of stdout.split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith("List of devices")) continue;
 
-        const parts = t.split(/\s+/);
-        if (parts.length < 2) continue;
+        const [id, state] = trimmed.split(/\s+/);
+        if (!id || !state) continue;
 
-        const [id, state] = parts;
         if (["device", "offline", "unauthorized"].includes(state))
-          devices[id] = state;
+          devices.set(id, state);
       }
 
       return devices;
     }
 
     async _getDeviceModel(serial) {
-      const out = await this._runCommand([
+      const { stdout } = await this._runCommand([
         this._adbPath,
         "-s",
         serial,
@@ -103,178 +164,227 @@ const ScrcpyToggle = GObject.registerClass(
         "getprop",
         "ro.product.model",
       ]);
-      return out.trim() || serial;
+
+      return stdout.trim() || serial;
     }
 
-    /* -------------------- mDNS -------------------- */
+    async _discoverMdnsAddresses() {
+      if (!this._avahiPath) return new Map();
 
-    async _discoverMdns() {
-      if (!this._avahiPath) return new Map(); // ip -> Set(ports)
-
-      const output = await this._runCommand([
+      const { stdout } = await this._runCommand([
         this._avahiPath,
-        "-t",
-        "-p",
-        "-r",
+        "-tpr",
         "_adb-tls-connect._tcp",
       ]);
 
-      const map = new Map();
-
-      for (const line of output.split("\n")) {
+      const addressInfos = new Map();
+      for (const line of stdout.split("\n")) {
         if (!line.startsWith("=")) continue;
 
         const parts = line.split(";");
-        const ip = parts[7];
-        const port = parts[8];
+        if (parts.length < 9) continue;
 
-        if (!ip || !port) continue;
+        const address = parts[7];
+        const port = Number.parseInt(parts[8], 10);
 
-        if (!map.has(ip)) map.set(ip, new Set());
+        if (!address || Number.isNaN(port)) continue;
 
-        map.get(ip).add(port);
+        let name = null;
+        const nameMatch = line.match(/"name=([^"]+)"/);
+        if (nameMatch && nameMatch[1]) {
+          name = nameMatch[1];
+        }
+
+        if (!addressInfos.has(address)) {
+          addressInfos.set(address, { ports: new Set(), name: name });
+        } else if (name && !addressInfos.get(address).name) {
+          addressInfos.get(address).name = name;
+        }
+
+        addressInfos.get(address).ports.add(port);
       }
 
-      return map;
+      return addressInfos;
     }
 
-    /* -------------------- UI refresh -------------------- */
-
     async _refreshDevices() {
+      const generation = ++this._refreshGeneration;
+
       this._deviceSection.removeAll();
-      this._spinner.opacity = 255;
+      this._setBusy(true);
 
       if (!this._adbPath) {
-        this._spinner.opacity = 0;
-        this._deviceSection.addMenuItem(
-          new PopupMenu.PopupMenuItem(_("ADB not found"), { reactive: false }),
-        );
+        this._setBusy(false);
+        this._setNoDevicesMessage(_("ADB not found in PATH"));
         return;
       }
 
       await this._runCommand([this._adbPath, "start-server"]);
 
-      const adb = await this._getAdbStatus();
-      const mdns = await this._discoverMdns();
+      const [adbDevices, mdnsAddresses] = await Promise.all([
+        this._getAdbStatus(),
+        this._discoverMdnsAddresses(),
+      ]);
 
-      this._spinner.opacity = 0;
+      if (this._destroyed || generation !== this._refreshGeneration) return;
 
-      const finalDevices = new Map(); // id -> {ready}
+      const merged = new Map();
 
-      /* ADB is authoritative */
-      for (const [id, state] of Object.entries(adb)) {
-        finalDevices.set(id, {
-          ready: state === "device",
+      for (const [id, state] of adbDevices.entries()) {
+        merged.set(id, {
+          state,
+          reachable: state === "device",
+          mdnsName: null,
         });
       }
 
-      /* Add mDNS only if ADB doesn't already know this IP */
-      for (const [ip, ports] of mdns.entries()) {
-        const known = [...finalDevices.keys()].some((id) =>
-          id.startsWith(ip + ":"),
+      for (const [address, info] of mdnsAddresses.entries()) {
+        const alreadyKnown = [...merged.keys()].some((id) =>
+          id.startsWith(`${address}:`),
         );
+        if (alreadyKnown) continue;
 
-        if (known) continue;
-
-        const port = Math.max(...[...ports].map(Number));
-        finalDevices.set(`${ip}:${port}`, { ready: false });
+        const highestPort = Math.max(...info.ports);
+        merged.set(`${address}:${highestPort}`, {
+          state: "mdns",
+          reachable: false,
+          mdnsName: info.name,
+        });
       }
 
-      if (finalDevices.size === 0) {
-        this._deviceSection.addMenuItem(
-          new PopupMenu.PopupMenuItem(_("No phones found"), {
-            reactive: false,
-          }),
+      if (merged.size === 0) {
+        this._setBusy(false);
+        this._setNoDevicesMessage(_("No phones found"));
+        return;
+      }
+
+      const names = await Promise.all(
+        [...merged.entries()].map(async ([id, info]) => {
+          const ip = id.split(":")[0];
+
+          if (info.reachable) {
+            const model = await this._getDeviceModel(id);
+            this._deviceNamesCache.set(ip, model);
+            return [id, model];
+          }
+
+          if (info.mdnsName) {
+            return [id, info.mdnsName];
+          }
+
+          if (this._deviceNamesCache.has(ip)) {
+            return [id, this._deviceNamesCache.get(ip)];
+          }
+
+          return [id, ip];
+        }),
+      );
+
+      const nameMap = new Map(names);
+
+      if (this._destroyed || generation !== this._refreshGeneration) return;
+
+      for (const [id, info] of merged.entries()) {
+        const deviceName = nameMap.get(id);
+        let labelText = deviceName;
+        let reactive = true;
+
+        if (info.state === "offline") labelText += ` (${_("Offline")})`;
+        else if (info.state === "unauthorized") {
+          labelText += ` (${_("Unauthorized")})`;
+          reactive = false;
+        }
+
+        const row = new PopupMenu.PopupImageMenuItem(
+          labelText,
+          "phone-symbolic",
+          { reactive },
+        );
+
+        if (this._activeSerial === id) {
+          row.setOrnament(PopupMenu.Ornament.CHECK);
+        }
+
+        row.connect("activate", () => {
+          if (info.reachable) void this._launchScrcpy(id, deviceName);
+          else void this._connectAndLaunch(id, deviceName);
+        });
+
+        this._deviceSection.addMenuItem(row);
+      }
+
+      this._setBusy(false);
+    }
+
+    async _connectAndLaunch(address, deviceName) {
+      await this._runCommand([this._adbPath, "connect", address]);
+
+      for (let attempt = 0; attempt < CONNECT_ATTEMPTS; attempt++) {
+        if (this._destroyed) return;
+
+        const adbDevices = await this._getAdbStatus();
+        if (adbDevices.get(address) === "device") {
+          await this._launchScrcpy(address, deviceName);
+          void this._refreshDevices();
+          return;
+        }
+
+        await this._sleep(CONNECT_RETRY_MS);
+      }
+
+      Main.notifyError(_("Unable to connect"), address);
+    }
+
+    async _launchScrcpy(serial, deviceName) {
+      if (!this._scrcpyPath) {
+        Main.notifyError(
+          _("scrcpy not found"),
+          _("Install scrcpy and try again."),
         );
         return;
       }
 
-      for (const [id, info] of finalDevices.entries()) {
-        const name = info.ready ? await this._getDeviceModel(id) : id;
+      if (this._activeScrcpyProc) return;
 
-        const item = new PopupMenu.PopupMenuItem(name);
-
-        item.insert_child_at_index(
-          new St.Icon({
-            icon_name: "phone-symbolic",
-            icon_size: 16,
-            opacity: info.ready ? 255 : 120,
-          }),
-          0,
-        );
-
-        item.add_child(
-          new St.Label({
-            text: info.ready ? _("Ready") : _("Connect"),
-            y_align: Clutter.ActorAlign.CENTER,
-            style_class: "run-label",
-          }),
-        );
-
-        item.connect("activate", () => {
-          info.ready ? this._launchScrcpy(id) : this._connectAndLaunch(id);
-        });
-
-        this._deviceSection.addMenuItem(item);
-      }
-    }
-
-    /* -------------------- actions -------------------- */
-
-    _connectAndLaunch(address) {
-      Main.notify(_("Connecting to phone…"), address);
-      GLib.spawn_command_line_async(`${this._adbPath} connect ${address}`);
-
-      let attempts = 0;
-
-      if (this._connectTimeoutId) {
-        GLib.Source.remove(this._connectTimeoutId);
-        this._connectTimeoutId = 0;
-      }
-
-      this._connectTimeoutId = GLib.timeout_add(
-        GLib.PRIORITY_DEFAULT,
-        500,
-        async () => {
-          attempts++;
-
-          const adb = await this._getAdbStatus();
-          if (adb[address] === "device") {
-            this._launchScrcpy(address);
-            this._connectTimeoutId = 0;
-            return GLib.SOURCE_REMOVE;
-          }
-
-          if (attempts >= 10) {
-            this._connectTimeoutId = 0;
-            return GLib.SOURCE_REMOVE;
-          }
-
-          return GLib.SOURCE_CONTINUE;
-        },
-      );
-    }
-
-    _launchScrcpy(serial) {
       this.checked = true;
+      this.subtitle = deviceName;
+      this._activeSerial = serial;
 
       try {
-        const proc = new Gio.Subprocess({
-          argv: ["scrcpy", "-s", serial, "--always-on-top"],
-        });
-        proc.init(null);
+        const proc = Gio.Subprocess.new(
+          [this._scrcpyPath, "-s", serial, "--always-on-top"],
+          Gio.SubprocessFlags.NONE,
+        );
+        this._activeScrcpyProc = proc;
 
         proc.wait_async(null, () => {
-          this.checked = false;
+          if (this._activeScrcpyProc === proc) {
+            this._activeScrcpyProc = null;
+            this._activeSerial = null;
+          }
+
+          if (!this._destroyed) {
+            this.checked = false;
+            this.subtitle = null;
+            if (this.menu.isOpen) void this._refreshDevices();
+          }
         });
       } catch {
+        this._activeScrcpyProc = null;
+        this._activeSerial = null;
         this.checked = false;
+        this.subtitle = null;
+        Main.notifyError(_("Failed to start scrcpy"), serial);
       }
     }
+
     destroy() {
-      if (this._connectTimeoutId) {
-        GLib.Source.remove(this._connectTimeoutId);
-        this._connectTimeoutId = 0;
+      this._destroyed = true;
+      this._refreshGeneration++;
+
+      if (this._openStateChangedId) {
+        this.menu.disconnect(this._openStateChangedId);
+        this._openStateChangedId = 0;
       }
 
       super.destroy();
@@ -282,28 +392,29 @@ const ScrcpyToggle = GObject.registerClass(
   },
 );
 
-const ScrcpyIndicator = GObject.registerClass(
-  class ScrcpyIndicator extends QuickSettings.SystemIndicator {
+const MirrorIndicator = GObject.registerClass(
+  class MirrorIndicator extends QuickSettings.SystemIndicator {
     _init() {
       super._init();
+
       this._indicator = this._addIndicator();
       this._indicator.icon_name = "phone-symbolic";
 
-      this.quickSettingsItems.push(new ScrcpyToggle());
+      this.quickSettingsItems.push(new MirrorToggle());
     }
 
     destroy() {
-      this.quickSettingsItems.forEach((item) => item.destroy());
-      this.quickSettingsItems.length = 0;
+      for (const item of this.quickSettingsItems) item.destroy();
 
+      this.quickSettingsItems = [];
       super.destroy();
     }
   },
 );
 
-export default class ScrcpyExtension extends Extension {
+export default class MirrorExtension extends Extension {
   enable() {
-    this._indicator = new ScrcpyIndicator();
+    this._indicator = new MirrorIndicator();
     Main.panel.statusArea.quickSettings.addExternalIndicator(this._indicator);
   }
 
