@@ -1,7 +1,7 @@
 **This GitHub repo (<https://github.com/TheRealSourcer/mirror>) is the official
 source for the project. Do not download releases from unverified sources.**
 
-# Mirror
+# Mirror (V6)
 
 <img src="https://raw.githubusercontent.com/TheRealSourcer/mirror/main/metadata.json" width="128" height="128" alt="mirror-icon" align="right" onerror="this.style.display='none'"/>
 
@@ -26,16 +26,17 @@ Its features include:
 
 Because this extension acts as a graphical wrapper, it requires the core dependencies to be installed on your Linux system and accessible in your `PATH`:
 
-1. **GNOME Shell:** Version 49.
+1. **GNOME Shell:** Version 49 or 50.
 2. **`scrcpy`:** For handling the actual video/audio mirroring and control.
 3. **`adb` (Android Debug Bridge):** For managing the device connections and fetching statuses.
 4. **`avahi-browse`:** For discovering wireless devices on your local network (usually provided by the `avahi-utils` or `avahi` package depending on your distro).
+5. **`qrencode`:** For generating the QR code for seamless pairing.
 
 Make sure you have [enabled USB debugging](https://developer.android.com/studio/debug/dev-options#enable) or Wireless Debugging on your Android device(s).
 
-## Get the app
+## Get the extension
 
- - **GNOME Extensions Website:** [Download from extensions.gnome.org] *(Add your EGO link here when published)*
+ - **GNOME Extensions Website:** [Download from extensions.gnome.org] *https://extensions.gnome.org/extension/9053/mirror/*
  - **Manual Installation:**
    ```bash
    git clone [https://github.com/TheRealSourcer/mirror.git](https://github.com/TheRealSourcer/mirror.git)
@@ -48,14 +49,13 @@ Make sure you have [enabled USB debugging](https://developer.android.com/studio/
 
  - **Wireless Debugging:** If your device is on the same Wi-Fi network and has Wireless Debugging enabled, Mirror will automatically find it using Avahi. Just click it in the list, and the extension will handle the `adb connect` pairing process for you.
  - **Closing the Stream:** You can close the active `scrcpy` window, or simply click the active Mirror toggle in Quick Settings to force-exit the process.
- - **Refreshing Devices:** If you just plugged in a phone or turned on Wi-Fi debugging, open the Mirror menu and click **Refresh Devices** to rescan via ADB and Avahi.
 
 ## Usage examples
 
 Unlike the CLI version, Mirror manages options through a graphical interface in your system menu. 
 
  - **Basic Mirroring:** Open your GNOME Quick Settings (top right corner), click the "Mirror" toggle, and select your connected device.
- - **Offline/Unauthorized Devices:** The menu will visibly label devices that are plugged in but "Offline" or "Unauthorized." If a device is unauthorized, you must accept the RSA key prompt on your Android device's screen first.
+ - **Offline/Unauthorized Devices:** The menu will visibly label devices that are visible but "Offline" or "Unauthorized." If a device is unauthorized, you must accept the RSA key prompt on your Android device's screen first.
 
 ## Resources
 
