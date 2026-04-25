@@ -3,9 +3,11 @@ source for the project. Do not download releases from unverified sources.**
 
 # Mirror (V6)
 
-<img src="https://raw.githubusercontent.com/TheRealSourcer/mirror/main/metadata.json" width="128" height="128" alt="mirror-icon" align="right" onerror="this.style.display='none'"/>
+<img src="./icon.svg" width="128" height="128" alt="mirror-icon" align="right" onerror="this.style.display='none'"/>
 
 This application is a GNOME Shell extension that serves as a native frontend for [scrcpy](https://github.com/Genymobile/scrcpy). It allows you to effortlessly mirror and control your Android devices directly from the GNOME Quick Settings menu. It is specially designed to leverage `avahi` and `adb` to auto-discover devices with wireless debugging enabled.
+
+<img src="./icon.svg" alt="mirror-icon" align="center" onerror="this.style.display='none'"/>
 
 It focuses on:
 
@@ -19,8 +21,7 @@ Its features include:
  - one-click device mirroring directly from the Quick Settings menu
  - automatic discovery of Android 11+ wireless debugging devices on your network
  - automatic `adb connect` execution for wireless devices
- - quick access to GNOME's Network Settings directly from the menu
- - forces the mirrored window to remain always on top (`--always-on-top`)
+ - seamless pairing with QR code
 
 ## Prerequisites
 
