@@ -26,7 +26,7 @@ const MirrorToggle = GObject.registerClass(
         toggleMode: true,
       });
 
-      this.connect("clicked", () => this._onToggled());
+      this._clickedId = this.connect("clicked", () => this._onToggled());
 
       this._adbPath = GLib.find_program_in_path("adb");
       this._scrcpyPath = GLib.find_program_in_path("scrcpy");
@@ -55,9 +55,13 @@ const MirrorToggle = GObject.registerClass(
       this._destroyed = false;
       this._isBusy = false;
       this._pairingDialog = null;
+      this._dialogClosedId = null;
 
       this._pairingActive = false;
       this._pairingPollTimeoutId = null;
+
+      this._sleepTimeouts = new Set();
+      this._idleIds = new Set();
 
       this.menu.setHeader("phone-symbolic", _("Mirror"));
 
@@ -107,14 +111,15 @@ const MirrorToggle = GObject.registerClass(
       const dialog = new ModalDialog.ModalDialog();
       this._pairingDialog = dialog;
 
-      dialog.connect('closed', () => {
+      this._dialogClosedId = dialog.connect('closed', () => {
         if (this._pairingPollTimeoutId) {
             GLib.source_remove(this._pairingPollTimeoutId);
             this._pairingPollTimeoutId = null;
         }
         this._pairingActive = false;
-        dialog.destroy();
+
         this._pairingDialog = null;
+        this._dialogClosedId = null;
       });
 
       const title = new St.Label({
@@ -287,10 +292,12 @@ const MirrorToggle = GObject.registerClass(
 
     _sleep(ms) {
       return new Promise((resolve) => {
-        GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => {
+        const id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => {
+          this._sleepTimeouts.delete(id);
           resolve();
           return GLib.SOURCE_REMOVE;
         });
+        this._sleepTimeouts.add(id);
       });
     }
 
@@ -363,7 +370,7 @@ const MirrorToggle = GObject.registerClass(
         const [id, state] = trimmed.split(/\s+/);
         if (!id || !state) continue;
 
-        if (["device", "offline", "unauthorized"].includes(state))
+        if (["device", "unauthorized"].includes(state))
           devices.set(id, state);
       }
 
@@ -461,17 +468,23 @@ const MirrorToggle = GObject.registerClass(
           row.add_child(statusLabel);
 
           row.connect("activate", () => {
-            if (isMirroring) {
-              if (this._activeScrcpyProc) this._activeScrcpyProc.force_exit();
-            } else {
-              if (info.state === "unauthorized") {
-                this._showPairingDialog(id);
-              } else if (info.reachable) {
-                void this._launchScrcpy(id, info.deviceName);
-              } else {
-                void this._connectAndLaunch(id, info.deviceName);
-              }
-            }
+            const idleId = GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+                this._idleIds.delete(idleId);
+
+                if (isMirroring) {
+                  if (this._activeScrcpyProc) this._activeScrcpyProc.force_exit();
+                } else {
+                  if (info.state === "unauthorized") {
+                    this._showPairingDialog(id);
+                  } else if (info.reachable) {
+                    void this._launchScrcpy(id, info.deviceName);
+                  } else {
+                    void this._connectAndLaunch(id, info.deviceName);
+                  }
+                }
+                return GLib.SOURCE_REMOVE;
+            });
+            this._idleIds.add(idleId);
           });
 
           this._deviceSection.addMenuItem(row);
@@ -493,6 +506,7 @@ const MirrorToggle = GObject.registerClass(
 
       const merged = new Map();
       const nameMap = new Map();
+      const seenIps = new Set();
 
       try {
         const [adbDevices, mdnsDevices] = await Promise.all([
@@ -501,6 +515,10 @@ const MirrorToggle = GObject.registerClass(
         ]);
 
         for (const [id, state] of adbDevices.entries()) {
+          const ip = id.includes(":") ? id.substring(0, id.lastIndexOf(":")) : id;
+          if (seenIps.has(ip) && id.includes(":")) continue;
+
+          seenIps.add(ip);
           merged.set(id, { state, reachable: true });
 
           let name = this._deviceNamesCache.get(id);
@@ -512,6 +530,8 @@ const MirrorToggle = GObject.registerClass(
         }
 
         for (const [address, info] of mdnsDevices.entries()) {
+          if (seenIps.has(address)) continue;
+
           const port = [...info.ports][0];
           const id = `${address}:${port}`;
 
@@ -524,7 +544,10 @@ const MirrorToggle = GObject.registerClass(
         console.error("Error fetching devices:", e);
       }
 
-      if (this._destroyed || !this.menu.isOpen) return;
+      if (this._destroyed || !this.menu.isOpen) {
+        this._setBusy(false);
+        return;
+      }
 
       this._knownDevices.clear();
       for (const [id, info] of merged.entries()) {
@@ -685,6 +708,16 @@ const MirrorToggle = GObject.registerClass(
       this._destroyed = true;
       this._stopContinuousScan();
 
+      for (const id of this._sleepTimeouts) {
+        GLib.source_remove(id);
+      }
+      this._sleepTimeouts.clear();
+
+      for (const id of this._idleIds) {
+        GLib.source_remove(id);
+      }
+      this._idleIds.clear();
+
       if (this._pairingPollTimeoutId) {
         GLib.source_remove(this._pairingPollTimeoutId);
         this._pairingPollTimeoutId = null;
@@ -692,12 +725,22 @@ const MirrorToggle = GObject.registerClass(
       this._pairingActive = false;
 
       if (this._pairingDialog) {
-        this._pairingDialog.close();
+        if (this._dialogClosedId) {
+            this._pairingDialog.disconnect(this._dialogClosedId);
+            this._dialogClosedId = null;
+        }
+        this._pairingDialog.destroy();
+        this._pairingDialog = null;
       }
 
       if (this._openStateChangedId) {
         this.menu.disconnect(this._openStateChangedId);
         this._openStateChangedId = 0;
+      }
+
+      if (this._clickedId) {
+        this.disconnect(this._clickedId);
+        this._clickedId = 0;
       }
 
       super.destroy();
@@ -718,12 +761,17 @@ const MirrorIndicator = GObject.registerClass(
       const toggle = new MirrorToggle();
       this.quickSettingsItems.push(toggle);
 
-      toggle.connect("notify::checked", () => {
+      this._notifyCheckedId = toggle.connect("notify::checked", () => {
         this._indicator.visible = toggle.checked;
       });
     }
 
     destroy() {
+      const toggle = this.quickSettingsItems[0];
+      if (toggle && this._notifyCheckedId) {
+        toggle.disconnect(this._notifyCheckedId);
+      }
+
       for (const item of this.quickSettingsItems) item.destroy();
 
       this.quickSettingsItems = [];

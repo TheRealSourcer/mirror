@@ -1,7 +1,7 @@
 **This GitHub repo (<https://github.com/TheRealSourcer/mirror>) is the official
 source for the project. Do not download releases from unverified sources.**
 
-# Mirror (V6)
+# Mirror (V8)
 
 <img src="./icon.svg" width="128" height="128" alt="mirror-icon" align="right" onerror="this.style.display='none'"/>
 
