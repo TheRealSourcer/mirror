@@ -1,4 +1,4 @@
-import Gtk from 'gi://Gtk?version=4.0';
+import Gtk from 'gi://Gtk';
 import Adw from 'gi://Adw';
 import Gio from "gi://Gio";
 
