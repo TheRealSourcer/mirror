@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+    <schema id="org.gnome.shell.extensions.mirror" path="/org/gnome/shell/extensions/mirror/">
+        <key name="show-indicator" type="b">
+            <default>true</default>
+        </key>
+        <key name="show-borders" type="b">
+            <default>true</default>
+        </key>
+        <key name="virtual-display" type="b">
+            <default>false</default>
+        </key>
+        <key name="keep-phone-awake" type="b">
+            <default>true</default>
+        </key>
+        <key name="turn-phone-screen-off" type="b">
+            <default>true</default>
+        </key>
+        <key name="mirror-video" type="b">
+            <default>true</default>
+        </key>
+        <key name="video-bit-rate" type="i">
+            <default>100</default>
+        </key>
+        <key name="video-max-size" type="i">
+            <default>0</default>
+        </key>
+        <key name="mirror-audio" type="b">
+            <default>true</default>
+        </key>
+        <key name="audio-bit-rate" type="i">
+            <default>128</default>
+        </key>
+        <key name="audio-buffer" type="i">
+            <default>50</default>
+        </key>
+        <key name="record-video" type="b">
+            <default>false</default>
+        </key>
+        <key name="video-format" type="i">
+            <default>0</default>
+        </key>
+        <key name="record-audio" type="b">
+            <default>false</default>
+        </key>
+        <key name="audio-format" type="i">
+            <default>0</default>
+        </key>
+    </schema>
+</schemalist>

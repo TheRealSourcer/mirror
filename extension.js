@@ -19,19 +19,20 @@ const CONNECT_RETRY_MS = 750;
 
 const MirrorToggle = GObject.registerClass(
   class MirrorToggle extends QuickSettings.QuickMenuToggle {
-    _init() {
+    _init(extensionInstance) {
       super._init({
         title: _("Mirror"),
         iconName: "phone-symbolic",
         toggleMode: true,
       });
 
-      this._clickedId = this.connect("clicked", () => this._onToggled());
-
+      this._extension = extensionInstance;
       this._adbPath = GLib.find_program_in_path("adb");
       this._scrcpyPath = GLib.find_program_in_path("scrcpy");
       this._avahiPath = GLib.find_program_in_path("avahi-browse");
       this._qrencodePath = GLib.find_program_in_path("qrencode");
+
+      this.connectObject("clicked", () => this._onToggled(), this);
 
       const missing = [];
       if (!this._adbPath) missing.push("adb");
@@ -83,24 +84,18 @@ const MirrorToggle = GObject.registerClass(
       this.menu.addMenuItem(this._deviceSection);
       this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-      this.menu.addAction(_("Network Settings"), () => {
-        Gio.Subprocess.new(
-          ["gnome-control-center", "network"],
-          Gio.SubprocessFlags.NONE,
-        );
+      this.menu.addAction(_("Mirror Preferences"), () => {
+        this._extension.openPreferences();
       });
 
-      this._openStateChangedId = this.menu.connect(
-        "open-state-changed",
-        (_menu, open) => {
-          if (open) {
-            this._renderDevices();
-            void this._refreshDevices();
-          } else {
-            this._stopContinuousScan();
-          }
-        },
-      );
+      this.menu.connectObject("open-state-changed", (_menu, open) => {
+        if (open) {
+          this._renderDevices();
+          void this._refreshDevices();
+        } else {
+          this._stopContinuousScan();
+        }
+      }, this);
     }
 
     async _showPairingDialog(address) {
@@ -111,7 +106,7 @@ const MirrorToggle = GObject.registerClass(
       const dialog = new ModalDialog.ModalDialog();
       this._pairingDialog = dialog;
 
-      this._dialogClosedId = dialog.connect('closed', () => {
+      dialog.connectObject('closed', () => {
         if (this._pairingPollTimeoutId) {
             GLib.source_remove(this._pairingPollTimeoutId);
             this._pairingPollTimeoutId = null;
@@ -120,8 +115,7 @@ const MirrorToggle = GObject.registerClass(
 
         this._pairingDialog = null;
         this._dialogClosedId = null;
-      });
-
+      }, this);
       const title = new St.Label({
         text: _("Pair Device Required"),
         style: "font-weight: bold; font-size: 16pt; margin-bottom: 16px;",
@@ -669,8 +663,56 @@ const MirrorToggle = GObject.registerClass(
       this._activeSerial = serial;
 
       try {
+        const settings = this._extension.getSettings();
+
+        const args = [
+          this._scrcpyPath,
+          "-s", serial
+        ];
+
+        if (!settings.get_boolean('show-borders')) {
+          args.push("--window-borderless");
+        }
+
+        if (settings.get_boolean('virtual-display')) {
+          args.push("--new-display");
+        }
+
+        if (settings.get_boolean('keep-phone-awake')) {
+          args.push("--stay-awake");
+        }
+
+        if (settings.get_boolean('turn-phone-screen-off')) {
+          args.push("--turn-screen-off");
+        }
+
+        if (settings.get_boolean('mirror-video')) {
+          args.push(`--video-bit-rate=${settings.get_uint("video-bit-rate").toString()}M`);
+          args.push(`--max-size=${settings.get_uint("video-max-size").toString()}`);
+        } else {
+          args.push("--no-video");
+        }
+
+        if (settings.get_boolean('mirror-audio')) {
+          args.push(`--audio-bit-rate=${settings.get_uint("audio-bit-rate").toString()}K`);
+          args.push(`--audio-buffer=${settings.get_uint("audio-buffer").toString()}`);
+        } else {
+          args.push("--no-audio");
+        }
+
+        const videoFormats = ['.mp4', '.m4a', '.aac', '.mkv', '.mka'];
+        const audioFormats = ['.opus', '.flac', '.wav'];
+
+        if (settings.get_boolean('record-video') && settings.get_boolean('record-audio')) {
+          args.push(`--record=mirror${videoFormats[settings.get_int("video-format")]}`);
+        } else if (settings.get_boolean('record-video')) {
+          args.push("--no-audio", `--record=mirror${videoFormats[settings.get_int("video-format")]}`);
+        } else if (settings.get_boolean('record-audio')) {
+          args.push("--no-video", `--record=mirror${audioFormats[settings.get_int("audio-format")]}`);
+        }
+
         const proc = Gio.Subprocess.new(
-          [this._scrcpyPath, "-s", serial, "--turn-screen-off", "--stay-awake"],
+          args,
           Gio.SubprocessFlags.NONE,
         );
         this._activeScrcpyProc = proc;
@@ -725,23 +767,13 @@ const MirrorToggle = GObject.registerClass(
       this._pairingActive = false;
 
       if (this._pairingDialog) {
-        if (this._dialogClosedId) {
-            this._pairingDialog.disconnect(this._dialogClosedId);
-            this._dialogClosedId = null;
-        }
+        this._pairingDialog.disconnectObject(this);
         this._pairingDialog.destroy();
         this._pairingDialog = null;
       }
 
-      if (this._openStateChangedId) {
-        this.menu.disconnect(this._openStateChangedId);
-        this._openStateChangedId = 0;
-      }
-
-      if (this._clickedId) {
-        this.disconnect(this._clickedId);
-        this._clickedId = 0;
-      }
+      this.menu.disconnectObject(this);
+      this.disconnectObject(this);
 
       super.destroy();
     }
@@ -750,27 +782,35 @@ const MirrorToggle = GObject.registerClass(
 
 const MirrorIndicator = GObject.registerClass(
   class MirrorIndicator extends QuickSettings.SystemIndicator {
-    _init() {
+    _init(extensionInstance) {
       super._init();
 
+      this._settings = extensionInstance.getSettings();
       this._indicator = this._addIndicator();
       this._indicator.icon_name = "phone-symbolic";
 
       this._indicator.visible = false;
 
-      const toggle = new MirrorToggle();
+      const toggle = new MirrorToggle(extensionInstance);
       this.quickSettingsItems.push(toggle);
 
-      this._notifyCheckedId = toggle.connect("notify::checked", () => {
-        this._indicator.visible = toggle.checked;
-      });
+      const updateIndicatorVisibility = () => {
+        this._indicator.visible = toggle.checked && this._settings.get_boolean('show-indicator');
+      };
+
+      toggle.connectObject("notify::checked", updateIndicatorVisibility, this);
+      this._settings.connectObject("changed::show-indicator", updateIndicatorVisibility, this);
     }
 
     destroy() {
       const toggle = this.quickSettingsItems[0];
-      if (toggle && this._notifyCheckedId) {
-        toggle.disconnect(this._notifyCheckedId);
-      }
+      if (toggle) {
+        toggle.disconnectObject(this);
+      };
+
+      if (this._settings) {
+        this._settings.disconnectObject(this);
+      };
 
       for (const item of this.quickSettingsItems) item.destroy();
 
@@ -782,7 +822,7 @@ const MirrorIndicator = GObject.registerClass(
 
 export default class MirrorExtension extends Extension {
   enable() {
-    this._indicator = new MirrorIndicator();
+    this._indicator = new MirrorIndicator(this);
     Main.panel.statusArea.quickSettings.addExternalIndicator(this._indicator);
   }
 

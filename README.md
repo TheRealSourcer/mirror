@@ -1,7 +1,7 @@
 **This GitHub repo (<https://github.com/TheRealSourcer/mirror>) is the official
 source for the project. Do not download releases from unverified sources.**
 
-# Mirror (V8)
+# Mirror (V0.9.0)
 
 <img src="./icon.svg" width="128" height="128" alt="mirror-icon" align="right" onerror="this.style.display='none'"/>
 
@@ -21,7 +21,8 @@ Its features include:
  - one-click device mirroring directly from the Quick Settings menu
  - automatic discovery of Android 11+ wireless debugging devices on your network
  - automatic `adb connect` execution for wireless devices
- - seamless pairing with QR code
+ - seamless pairing with QR 
+ - customization through settings panel
 
 ## Prerequisites
 
