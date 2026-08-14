@@ -99,6 +99,8 @@ const MirrorToggle = GObject.registerClass(
     }
 
     async _showPairingDialog(address) {
+      this.menu.close();
+
       if (this._pairingDialog) {
         this._pairingDialog.close();
       }
