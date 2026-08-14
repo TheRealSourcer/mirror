@@ -7,7 +7,7 @@ source for the project. Do not download releases from unverified sources.**
 
 This application is a GNOME Shell extension that serves as a native frontend for [scrcpy](https://github.com/Genymobile/scrcpy). It allows you to effortlessly mirror and control your Android devices directly from the GNOME Quick Settings menu. It is specially designed to leverage `avahi` and `adb` to auto-discover devices with wireless debugging enabled.
 
-<img src="./showcase.png" alt="mirror-icon" align="center" onerror="this.style.display='none'"/>
+<img src="./showcase.png" alt="mirror-showcase" align="center" onerror="this.style.display='none'"/>
 
 It focuses on:
 
@@ -28,7 +28,7 @@ Its features include:
 
 Because this extension acts as a graphical wrapper, it requires the core dependencies to be installed on your Linux system and accessible in your `PATH`:
 
-1. **GNOME Shell:** Version 49 or 50.
+1. **GNOME Shell:** Version 46, 47, 48, 49 or 50.
 2. **`scrcpy`:** For handling the actual video/audio mirroring and control.
 3. **`adb` (Android Debug Bridge):** For managing the device connections and fetching statuses.
 4. **`avahi-browse`:** For discovering wireless devices on your local network (usually provided by the `avahi-utils` or `avahi` package depending on your distro).
