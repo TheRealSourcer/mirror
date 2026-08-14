@@ -99,6 +99,8 @@ const MirrorToggle = GObject.registerClass(
     }
 
     async _showPairingDialog(address) {
+      this.menu.close();
+
       if (this._pairingDialog) {
         this._pairingDialog.close();
       }
@@ -496,24 +498,6 @@ const MirrorToggle = GObject.registerClass(
 
       if (this._destroyed || !this.menu.isOpen) return;
 
-      // Rebuilding the device rows while a pairing dialog is open races with
-      // the dialog's own flow: removeAll() destroys the PopupImageMenuItem
-      // for the device being paired, and later code that still references it
-      // throws "already disposed" and aborts pairing. Skip the rebuild but
-      // keep polling so it resumes as soon as the dialog closes.
-      if (this._pairingDialog) {
-        this._scanTimeoutId = GLib.timeout_add(
-          GLib.PRIORITY_DEFAULT,
-          3000,
-          () => {
-            this._scanTimeoutId = null;
-            void this._refreshDevices();
-            return GLib.SOURCE_REMOVE;
-          },
-        );
-        return;
-      }
-
       this._setBusy(true);
 
       const merged = new Map();
@@ -558,20 +542,6 @@ const MirrorToggle = GObject.registerClass(
 
       if (this._destroyed || !this.menu.isOpen) {
         this._setBusy(false);
-        return;
-      }
-
-      if (this._pairingDialog) {
-        this._setBusy(false);
-        this._scanTimeoutId = GLib.timeout_add(
-          GLib.PRIORITY_DEFAULT,
-          3000,
-          () => {
-            this._scanTimeoutId = null;
-            void this._refreshDevices();
-            return GLib.SOURCE_REMOVE;
-          },
-        );
         return;
       }
 
