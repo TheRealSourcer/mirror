@@ -101,18 +101,22 @@ export default class MirrorPreferences extends ExtensionPreferences {
     dependencyRow.activatable_widget = installButton;
     dependencyGroup.add(dependencyRow);
 
-    const updateDependencyGroup = () => {
-      const missing = this._getMissingDependencies();
+    const updateDependencyGroup = async () => {
+      const missing = await this._getMissingDependencies();
 
       dependencyGroup.visible = missing.length > 0;
-      dependencyRow.subtitle = missing.length > 0 ? _('Missing: ') + missing.join(', ') : '';
+      dependencyRow.subtitle = missing.length > 0
+        ? _('Missing or outdated: ') + missing.join(', ')
+        : '';
+
+      return missing;
     };
 
     const installDependencies = async () => {
-      const missing = this._getMissingDependencies();
+      const missing = await this._getMissingDependencies();
 
       if (missing.length === 0) {
-        updateDependencyGroup();
+        await updateDependencyGroup();
         return;
       }
 
@@ -120,20 +124,37 @@ export default class MirrorPreferences extends ExtensionPreferences {
       installButton.label = _('Installing…');
 
       try {
-        const argv = this._getInstallCommand(missing);
-        await this._runCommand(argv);
+        let installable = missing;
+        let skippedScrcpy = false;
 
-        const remaining = this._getMissingDependencies();
-        updateDependencyGroup();
+        if (this._getDistroFamily() === 'debian' && missing.includes('scrcpy')) {
+          const candidateMajor = await this._getAptScrcpyCandidateMajorVersion();
+
+          if (candidateMajor === null || candidateMajor < 3) {
+            installable = missing.filter(dependency => dependency !== 'scrcpy');
+            skippedScrcpy = true;
+            window.add_toast(new Adw.Toast({
+              title: _("APT's scrcpy candidate is incompatible or unavailable. Install scrcpy 3.0+ manually."),
+              timeout: 10,
+            }));
+          }
+        }
+
+        if (installable.length > 0) {
+          const argv = this._getInstallCommand(installable);
+          await this._runCommand(argv);
+        }
+
+        const remaining = await updateDependencyGroup();
 
         if (remaining.length === 0) {
           window.add_toast(new Adw.Toast({
             title: _('Dependencies installed successfully'),
             timeout: 5,
           }));
-        } else {
+        } else if (!skippedScrcpy || remaining.some(dependency => dependency !== 'scrcpy')) {
           window.add_toast(new Adw.Toast({
-            title: _('Still missing: ') + remaining.join(', '),
+            title: _('Still missing or outdated: ') + remaining.join(', '),
             timeout: 8,
           }));
         }
@@ -147,7 +168,7 @@ export default class MirrorPreferences extends ExtensionPreferences {
           timeout: 8,
         }));
 
-        updateDependencyGroup();
+        await updateDependencyGroup();
       } finally {
         installButton.label = _('Install Dependencies');
         installButton.sensitive = true;
@@ -155,7 +176,7 @@ export default class MirrorPreferences extends ExtensionPreferences {
     };
 
     installButton.connect('clicked', () => { void installDependencies(); });
-    updateDependencyGroup();
+    void updateDependencyGroup();
 
     const appearanceGroup = new Adw.PreferencesGroup({
       title: _('Appearance'),
@@ -326,10 +347,61 @@ export default class MirrorPreferences extends ExtensionPreferences {
     settings.bind('record-audio', recordAudioRow, 'enable-expansion', Gio.SettingsBindFlags.DEFAULT);
   }
 
-  _getMissingDependencies() {
-    return DEPENDENCIES.filter(command =>
+  async _getMissingDependencies() {
+    const missing = DEPENDENCIES.filter(command =>
       !GLib.find_program_in_path(command)
     );
+
+    if (!missing.includes('scrcpy')) {
+      const scrcpyMajor = await this._getScrcpyMajorVersion();
+
+      if (scrcpyMajor === null || scrcpyMajor < 3) {
+        missing.push('scrcpy');
+      }
+    }
+
+    return missing;
+  }
+
+  async _getScrcpyMajorVersion() {
+    const scrcpyPath = GLib.find_program_in_path('scrcpy');
+
+    if (!scrcpyPath) {
+      return null;
+    }
+
+    try {
+      const {stdout, stderr} = await this._runCommand([scrcpyPath, '--version']);
+      const match = `${stdout}\n${stderr}`.match(/\bscrcpy\s+v?(\d+)/i);
+      return match ? Number.parseInt(match[1], 10) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async _getAptScrcpyCandidateMajorVersion() {
+    const aptCachePath = GLib.find_program_in_path('apt-cache');
+
+    if (!aptCachePath) {
+      return null;
+    }
+
+    try {
+      const {stdout} = await this._runCommand(
+        [aptCachePath, 'policy', 'scrcpy'],
+        {LC_ALL: 'C'}
+      );
+      const candidate = stdout.match(/^\s*Candidate:\s*(\S+)/m)?.[1];
+
+      if (!candidate || candidate === '(none)') {
+        return null;
+      }
+
+      const major = candidate.match(/^(?:\d+:)?(\d+)/)?.[1];
+      return major ? Number.parseInt(major, 10) : null;
+    } catch {
+      return null;
+    }
   }
 
   _getDistroFamily() {
@@ -432,16 +504,21 @@ export default class MirrorPreferences extends ExtensionPreferences {
     ];
   }
 
-  _runCommand(argv) {
+  _runCommand(argv, environment = {}) {
     return new Promise((resolve, reject) => {
       let process;
 
       try {
-        process = Gio.Subprocess.new(
-          argv,
+        const launcher = Gio.SubprocessLauncher.new(
           Gio.SubprocessFlags.STDOUT_PIPE |
             Gio.SubprocessFlags.STDERR_PIPE
         );
+
+        for (const [name, value] of Object.entries(environment)) {
+          launcher.setenv(name, value, true);
+        }
+
+        process = launcher.spawnv(argv);
       } catch (error) {
         reject(error);
         return;
@@ -456,7 +533,7 @@ export default class MirrorPreferences extends ExtensionPreferences {
               source.communicate_utf8_finish(result);
 
             if (source.get_successful()) {
-              resolve();
+              resolve({stdout, stderr});
               return;
             }
 
