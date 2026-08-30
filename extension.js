@@ -11,6 +11,7 @@ import {
 import * as QuickSettings from "resource:///org/gnome/shell/ui/quickSettings.js";
 import * as PopupMenu from "resource:///org/gnome/shell/ui/popupMenu.js";
 import * as ModalDialog from "resource:///org/gnome/shell/ui/modalDialog.js";
+import * as MessageTray from "resource:///org/gnome/shell/ui/messageTray.js";
 import { Spinner } from "resource:///org/gnome/shell/ui/animation.js";
 import St from "gi://St";
 
@@ -27,24 +28,13 @@ const MirrorToggle = GObject.registerClass(
       });
 
       this._extension = extensionInstance;
-      this._adbPath = GLib.find_program_in_path("adb");
-      this._scrcpyPath = GLib.find_program_in_path("scrcpy");
-      this._avahiPath = GLib.find_program_in_path("avahi-browse");
-      this._qrencodePath = GLib.find_program_in_path("qrencode");
+      this._dependencyNotification = null;
+      const missing = this._updateDependencyPaths();
 
       this.connectObject("clicked", () => this._onToggled(), this);
 
-      const missing = [];
-      if (!this._adbPath) missing.push("adb");
-      if (!this._scrcpyPath) missing.push("scrcpy");
-      if (!this._avahiPath) missing.push("avahi-browse");
-      if (!this._qrencodePath) missing.push("qrencode");
-
       if (missing.length > 0) {
-        Main.notify(
-          _("Mirror Extension Error"),
-          _("Missing dependencies. Please install: ") + missing.join(", ")
-        );
+        this._showMissingDependenciesNotification(missing);
       }
 
       this._deviceNamesCache = new Map();
@@ -90,12 +80,66 @@ const MirrorToggle = GObject.registerClass(
 
       this.menu.connectObject("open-state-changed", (_menu, open) => {
         if (open) {
+          this._updateDependencyPaths();
           this._renderDevices();
           void this._refreshDevices();
         } else {
           this._stopContinuousScan();
         }
       }, this);
+    }
+
+    _updateDependencyPaths() {
+      this._adbPath = GLib.find_program_in_path("adb");
+      this._scrcpyPath = GLib.find_program_in_path("scrcpy");
+      this._avahiPath = GLib.find_program_in_path("avahi-browse");
+      this._qrencodePath = GLib.find_program_in_path("qrencode");
+
+      const missing = [];
+
+      if (!this._adbPath) missing.push("adb");
+      if (!this._scrcpyPath) missing.push("scrcpy");
+      if (!this._avahiPath) missing.push("avahi-browse");
+      if (!this._qrencodePath) missing.push("qrencode");
+
+      return missing;
+    }
+
+    _showMissingDependenciesNotification(missing) {
+      const source = MessageTray.getSystemSource();
+
+      const notification = new MessageTray.Notification({
+        source,
+        title: _("Mirror Extension Error"),
+        body: _("Missing dependencies: ") + missing.join(", "),
+        isTransient: true,
+      });
+
+      const openPreferences = () => {
+        if (!this._destroyed) {
+          this._extension.openPreferences();
+        }
+      };
+
+      notification.connectObject(
+        "activated",
+        openPreferences,
+        "destroy",
+        () => {
+          if (this._dependencyNotification === notification) {
+            this._dependencyNotification = null;
+          }
+        },
+        this,
+      );
+
+      notification.addAction(
+        _("Open Preferences"),
+        openPreferences,
+      );
+
+      this._dependencyNotification = notification;
+      source.addNotification(notification);
     }
 
     async _showPairingDialog(address) {
@@ -750,6 +794,12 @@ const MirrorToggle = GObject.registerClass(
 
     destroy() {
       this._destroyed = true;
+
+      if (this._dependencyNotification) {
+         this._dependencyNotification.destroy();
+         this._dependencyNotification = null;
+      }
+
       this._stopContinuousScan();
 
       for (const id of this._sleepTimeouts) {
