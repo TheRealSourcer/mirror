@@ -725,7 +725,7 @@ const MirrorToggle = GObject.registerClass(
         }
 
         if (settings.get_boolean('keep-phone-awake')) {
-          args.push("--stay-awake");
+          args.push("--keep-active");
         }
 
         if (settings.get_boolean('turn-phone-screen-off')) {
