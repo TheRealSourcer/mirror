@@ -722,6 +722,7 @@ const MirrorToggle = GObject.registerClass(
 
         if (settings.get_boolean('virtual-display')) {
           args.push("--new-display");
+          args.push("--flex-display");
         }
 
         if (settings.get_boolean('keep-phone-awake')) {
