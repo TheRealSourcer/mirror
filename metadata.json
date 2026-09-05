@@ -6,6 +6,6 @@
   "shell-version": ["46", "47", "48", "49", "50"],
   "url": "https://github.com/TheRealSourcer/mirror",
   "uuid": "mirror@distro.com",
-  "version": 15,
-  "version-name": "0.10.0"
+  "version": 18,
+  "version-name": "0.10.1"
 }
