@@ -15,7 +15,7 @@ const DEPENDENCIES = [
 const INSTALLERS = {
   fedora: {
     commands: ["dnf5", "dnf"],
-    args: ["install", "-y"],
+    args: ["install", "-y", "--skip-unavailable"],
     packages: {
       adb: "android-tools",
       scrcpy: "scrcpy",
@@ -130,11 +130,11 @@ export default class MirrorPreferences extends ExtensionPreferences {
         if (this._getDistroFamily() === 'debian' && missing.includes('scrcpy')) {
           const candidateMajor = await this._getAptScrcpyCandidateMajorVersion();
 
-          if (candidateMajor === null || candidateMajor < 3) {
+          if (candidateMajor === null || candidateMajor < 4) {
             installable = missing.filter(dependency => dependency !== 'scrcpy');
             skippedScrcpy = true;
             window.add_toast(new Adw.Toast({
-              title: _("APT's scrcpy candidate is incompatible or unavailable. Install scrcpy 3.0+ manually."),
+              title: _("APT's scrcpy candidate is incompatible or unavailable. Install scrcpy 4.0+ manually."),
               timeout: 10,
             }));
           }
@@ -355,7 +355,7 @@ export default class MirrorPreferences extends ExtensionPreferences {
     if (!missing.includes('scrcpy')) {
       const scrcpyMajor = await this._getScrcpyMajorVersion();
 
-      if (scrcpyMajor === null || scrcpyMajor < 3) {
+      if (scrcpyMajor === null || scrcpyMajor < 4) {
         missing.push('scrcpy');
       }
     }
