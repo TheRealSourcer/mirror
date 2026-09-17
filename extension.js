@@ -733,6 +733,10 @@ const MirrorToggle = GObject.registerClass(
           args.push("--turn-screen-off");
         }
 
+        if (settings.get_boolean('power-off-on-close')) {
+          args.push("--power-off-on-close");
+        }
+
         if (settings.get_boolean('mirror-video')) {
           args.push(`--video-bit-rate=${settings.get_uint("video-bit-rate").toString()}M`);
           args.push(`--max-size=${settings.get_uint("video-max-size").toString()}`);

@@ -16,6 +16,9 @@
         <key name="turn-phone-screen-off" type="b">
             <default>true</default>
         </key>
+        <key name="power-off-on-close" type="b">
+            <default>true</default>
+        </key>
         <key name="mirror-video" type="b">
             <default>true</default>
         </key>

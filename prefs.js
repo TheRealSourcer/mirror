@@ -220,6 +220,11 @@ export default class MirrorPreferences extends ExtensionPreferences {
       subtitle: _('Whether to turn phone screen off while mirroring'),
     });
 
+    const powerOffOnCloseRow = new Adw.SwitchRow({
+      title: _('Power Off On Close'),
+      subtitle: _('Whether to power off the phone when mirroring ends'),
+    });
+
     const mirrorVideoRow = new Adw.ExpanderRow({
       title: _('Mirror Video'),
       subtitle: _('Whether to mirror video'),
@@ -337,6 +342,8 @@ export default class MirrorPreferences extends ExtensionPreferences {
     settings.bind('keep-phone-awake', keepPhoneAwakeRow, 'active', Gio.SettingsBindFlags.DEFAULT);
     behaviorGroup.add(turnPhoneScreenOffRow);
     settings.bind('turn-phone-screen-off', turnPhoneScreenOffRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+    behaviorGroup.add(powerOffOnCloseRow);
+    settings.bind('power-off-on-close', powerOffOnCloseRow, 'active', Gio.SettingsBindFlags.DEFAULT);
     behaviorGroup.add(mirrorVideoRow);
     settings.bind('mirror-video', mirrorVideoRow, 'enable-expansion', Gio.SettingsBindFlags.DEFAULT);
     behaviorGroup.add(mirrorAudioRow);
