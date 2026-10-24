@@ -762,11 +762,40 @@ const MirrorToggle = GObject.registerClass(
           args.push("--no-video", `--record=mirror${audioFormats[settings.get_int("audio-format")]}`);
         }
 
+        const customOptionsSettings = settings.get_string('custom-options').trim();
+
+        if (customOptionsSettings) {
+          const [, customOptions] = GLib.shell_parse_argv(customOptionsSettings);
+          args.push(...customOptions);
+        }
+
         const proc = Gio.Subprocess.new(
           args,
-          Gio.SubprocessFlags.NONE,
+          Gio.SubprocessFlags.STDERR_PIPE,
         );
         this._activeScrcpyProc = proc;
+
+        proc.communicate_utf8_async(null, null, (process, result) => {
+          try {
+            const [, , stderr] = process.communicate_utf8_finish(result);
+
+            if (!process.get_successful()) {
+              let errorMessage = "";
+
+              if (customOptionsSettings && stderr) errorMessage += (stderr.trim() + _('\nPossibly due to invalid Custom Options.'));
+              else if (customOptionsSettings) errorMessage += _('Possibly due to invalid Custom Options.');
+              else if (stderr.trim()) errorMessage += stderr.trim();
+              else errorMessage += _('Could not start mirroring.');
+
+              Main.notifyError(
+                _('Mirroring failed'),
+                errorMessage
+              )
+            }
+          } catch(error) {
+            console.error(error);
+          }
+        })
 
         proc.wait_async(null, () => {
           if (this._activeScrcpyProc === proc) {

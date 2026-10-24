@@ -352,6 +352,18 @@ export default class MirrorPreferences extends ExtensionPreferences {
     settings.bind('record-video', recordVideoRow, 'enable-expansion', Gio.SettingsBindFlags.DEFAULT);
     behaviorGroup.add(recordAudioRow);
     settings.bind('record-audio', recordAudioRow, 'enable-expansion', Gio.SettingsBindFlags.DEFAULT);
+
+    const customGroup = new Adw.PreferencesGroup({
+      title: _('Custom'),
+    });
+    page.add(customGroup);
+
+    const customOptionsRow = new Adw.EntryRow({
+      title: _('Custom Options')
+    });
+
+    customGroup.add(customOptionsRow);
+    settings.bind('custom-options', customOptionsRow, 'text', Gio.SettingsBindFlags.DEFAULT);
   }
 
   async _getMissingDependencies() {

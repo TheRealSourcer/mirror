@@ -49,5 +49,8 @@
         <key name="audio-format" type="i">
             <default>0</default>
         </key>
+        <key name="custom-options" type="s">
+            <default>''</default>
+        </key>
     </schema>
 </schemalist>
