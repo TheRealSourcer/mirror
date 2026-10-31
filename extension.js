@@ -292,6 +292,7 @@ const MirrorToggle = GObject.registerClass(
 
         const parts = line.split(";");
         if (parts.length < 9) continue;
+        if (parts[2] === "IPv6") continue;
 
         const address = parts[7];
         const port = Number.parseInt(parts[8], 10);
@@ -325,7 +326,7 @@ const MirrorToggle = GObject.registerClass(
         }
       } else {
         if (this._activeScrcpyProc) {
-          this._activeScrcpyProc.force_exit();
+          this._userStopped = true; this._activeScrcpyProc.send_signal(15);
         }
       }
     }
@@ -445,6 +446,7 @@ const MirrorToggle = GObject.registerClass(
 
         const parts = line.split(";");
         if (parts.length < 9) continue;
+        if (parts[2] === "IPv6") continue;
 
         const address = parts[7];
         const port = Number.parseInt(parts[8], 10);
@@ -512,7 +514,7 @@ const MirrorToggle = GObject.registerClass(
                 this._idleIds.delete(idleId);
 
                 if (isMirroring) {
-                  if (this._activeScrcpyProc) this._activeScrcpyProc.force_exit();
+                  if (this._activeScrcpyProc) { this._userStopped = true; this._activeScrcpyProc.send_signal(15); }
                 } else {
                   if (info.state === "unauthorized") {
                     this._showPairingDialog(id);
@@ -774,12 +776,13 @@ const MirrorToggle = GObject.registerClass(
           Gio.SubprocessFlags.STDERR_PIPE,
         );
         this._activeScrcpyProc = proc;
+        this._userStopped = false;
 
         proc.communicate_utf8_async(null, null, (process, result) => {
           try {
             const [, , stderr] = process.communicate_utf8_finish(result);
 
-            if (!process.get_successful()) {
+            if (!process.get_successful() && !this._userStopped) {
               let errorMessage = "";
 
               if (customOptionsSettings && stderr) errorMessage += (stderr.trim() + _('\nPossibly due to invalid Custom Options.'));
